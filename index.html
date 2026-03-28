@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Live | Embedded Demo</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Gemini Live</h1>
+      <p class="subtitle">Experience real-time, low-latency multimodal interaction</p>
+    </header>
+
+    <div class="main-content">
+      <div class="video-container">
+        <video id="camera-preview" autoplay playsinline muted></video>
+        <div class="camera-status" id="camera-status">Camera Off</div>
+        <canvas id="overlay-canvas"></canvas>
+      </div>
+
+      <div class="interaction-pane">
+        <div class="visualizer-container">
+          <canvas id="canvas"></canvas>
+          <div id="status" class="status-indicator">
+            <span class="dot" id="status-dot"></span>
+            <span id="status-text">Disconnected</span>
+          </div>
+        </div>
+
+        <div class="chat-log" id="chat-log">
+          <!-- Messages appear here -->
+          <div class="chat-entry gemini">
+            <div class="bubble">Welcome! I'm your Live DIY Assistant. Enter your API Key and click 'Start Session' to begin the video guidance.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="input-group">
+        <label for="api-key">Gemini API Key</label>
+        <input type="password" id="api-key" placeholder="Enter your key from AI Studio" value="">
+      </div>
+      
+      <div class="buttons">
+        <button id="start-btn" class="primary-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="m9 12 2 2 4-4"/></svg>
+          Start Live Session
+        </button>
+        <button id="stop-btn" class="stop-btn" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+          End Session
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

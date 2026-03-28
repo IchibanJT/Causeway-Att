@@ -1,0 +1,12 @@
+{
+  "name": "gemini-live-embed",
+  "version": "1.0.0",
+  "description": "Gemini Live Embedded Demo with Vite",
+  "main": "app.js",
+  "scripts": {
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
