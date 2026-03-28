@@ -255,7 +255,7 @@ async function startAudio() {
 
     audioWorkletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
 
-    let audioBuffer = new Int16Array(1600); // 100ms buffer at 16kHz
+    let audioBuffer = new Int16Array(2400); // 100ms buffer at 24kHz (Aligned with AI output)
     let bufferOffset = 0;
 
     audioWorkletNode.port.onmessage = (event) => {
@@ -268,19 +268,20 @@ async function startAudio() {
           
           if (bufferOffset >= audioBuffer.length) {
             const base64 = arrayBufferToBase64(audioBuffer.buffer);
-        // 16kHz for Gemini input is still standard for the API, even if our context is 24kHz
+        // Align input rate to 24000 to match our context and the AI's native processing
         const msg = {
           realtimeInput: {
             mediaChunks: [
               {
-                mimeType: "audio/pcm;rate=16000",
+                mimeType: "audio/pcm;rate=24000",
                 data: base64
               }
             ]
           }
         };
-            socket.send(JSON.stringify(msg));
-            bufferOffset = 0;
+        socket.send(JSON.stringify(msg));
+        console.log('Sent audio chunk', base64.length); 
+        bufferOffset = 0;
           }
         }
       }
