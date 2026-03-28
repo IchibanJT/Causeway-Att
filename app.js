@@ -71,29 +71,36 @@ async function startSession() {
   try {
     updateStatus('Connecting...');
 
-    // 1. Initialize WebSocket
-    const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+    // 0. Immediate UI Feedback & Media Activation
+    isRunning = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    startCamera();
+    drawVisualizer(); // Ensure visualizer starts immediately
+
+    // 1. Initialize WebSocket (v1alpha for 3.1 preview stability)
+    const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`;
     socket = new WebSocket(url);
 
     socket.onopen = () => {
       console.log('WebSocket Opened');
       updateStatus('Connected', true);
 
-      // Send Setup message
+      // Send Comprehensive Setup for 3.1 (using required camelCase keys)
       const setupMsg = {
         setup: {
           model: "models/gemini-3.1-flash-live-preview",
-          generation_config: {
-            response_modalities: ["AUDIO"],
-            speech_config: {
-              voice_config: {
-                prebuilt_voice_config: {
-                  voice_name: "Puck"
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: "Puck"
                 }
               }
             }
           },
-          system_instruction: {
+          systemInstruction: {
             parts: [{
               text: "You are a helpful, safety-conscious DIY assistant. You can see the user through their camera feed. Your job is to walk them through solving tasks by hand (like changing a car tire, fixing a faucet, etc.) step-by-step. Speak naturally, be encouraging, and give clear instructions based on exactly what you see in the video. If you see them doing something dangerous, warn them immediately. Keep your responses concise and focused on the current step."
             }]
@@ -101,10 +108,6 @@ async function startSession() {
         }
       };
       socket.send(JSON.stringify(setupMsg));
-
-      isRunning = true;
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
       console.log('Setup Sent, waiting for setupComplete...');
     };
 
@@ -114,8 +117,8 @@ async function startSession() {
       
       // 2. Handle Handshake Completion
       if (response.setupComplete) {
-        console.log('Setup Complete! Starting media...');
-        startCamera();
+        console.log('Setup Complete! Starting media loops...');
+        // startCamera() is already active
         startAudio();
         startVideoStreaming();
         appendMessage('gemini', 'Connected and ready! I can see and hear you.');
@@ -146,13 +149,14 @@ async function startSession() {
 
     socket.onclose = (event) => {
       console.log('WebSocket Closed', event);
-      if (event.code === 1000) {
-        updateStatus('Disconnected');
-      } else {
-        updateStatus('Connection Closed');
-        appendMessage('gemini', `Connection closed (Code: ${event.code}). This usually means an invalid API key, an incorrect Model ID, or a project permission issue.`);
+      if (isRunning) {
+        if (event.code === 1011) {
+          appendMessage('gemini', 'Server Error (1011): The model rejected the setup. This often happens if the API key is restricted or the model ID is incorrect for your region.');
+        } else if (event.code !== 1000) {
+          appendMessage('gemini', `Connection closed (Code: ${event.code}).`);
+        }
+        stopSession();
       }
-      stopSession();
     };
 
   } catch (error) {
@@ -163,15 +167,17 @@ async function startSession() {
 
 async function startCamera() {
   try {
+    // Flexible constraints for wider device support
     videoStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+      video: true 
     });
     cameraPreview.srcObject = videoStream;
     cameraStatus.textContent = 'Camera Live';
     cameraStatus.style.background = 'rgba(55, 178, 77, 0.6)';
+    console.log('Camera started');
   } catch (error) {
     console.error('Camera Access Failed', error);
-    appendMessage('gemini', 'Error: Could not access camera.');
+    appendMessage('gemini', 'Error: Could not access camera. Please check permissions.');
   }
 }
 
@@ -304,20 +310,41 @@ async function playNextChunk() {
 }
 
 function stopSession() {
+  console.log('Stopping session and resetting UI...');
+  
+  // 1. Immediate UI Reset
   isRunning = false;
   startBtn.disabled = false;
   stopBtn.disabled = true;
-
-  if (socket) socket.close();
-  if (source) source.mediaStream.getTracks().forEach(track => track.stop());
-  if (videoStream) videoStream.getTracks().forEach(track => track.stop());
-  if (audioContext) audioContext.close();
-  if (videoInterval) clearInterval(videoInterval);
-
-  cameraPreview.srcObject = null;
+  updateStatus('Disconnected');
   cameraStatus.textContent = 'Camera Off';
   cameraStatus.style.background = 'rgba(0, 0, 0, 0.6)';
+  cameraPreview.srcObject = null;
 
+  // 2. Resource Cleanup
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.close();
+  }
+  
+  try {
+    if (source) {
+      if (source.mediaStream) {
+        source.mediaStream.getTracks().forEach(track => track.stop());
+      }
+    }
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+    }
+    if (audioContext) {
+      audioContext.close();
+    }
+  } catch (e) {
+    console.error('Cleanup error', e);
+  }
+
+  if (videoInterval) clearInterval(videoInterval);
+
+  // 3. Reset State Variables
   socket = null;
   audioContext = null;
   audioWorkletNode = null;
@@ -325,6 +352,7 @@ function stopSession() {
   audioQueue = [];
   videoStream = null;
   videoInterval = null;
+  isPlaying = false;
 }
 
 startBtn.addEventListener('click', startSession);
