@@ -5,6 +5,8 @@ let source;
 let isRunning = false;
 let audioQueue = [];
 let isPlaying = false;
+let nextStartTime = 0;
+const JITTER_BUFFER_THRESHOLD = 3; // Wait for initial chunks to prevent stutter
 let videoStream;
 let videoInterval;
 
@@ -234,9 +236,10 @@ function sendVideoFrame() {
 
 async function startAudio() {
   try {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      await audioContext.resume(); // Requirement for modern browsers to process audio
-      console.log('AudioContext resumed', audioContext.sampleRate);
+      // Switch to 24000Hz (Native AI Voice rate) for crystal clear, static-free output
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+      await audioContext.resume();
+      console.log('AudioContext resumed at native 24kHz');
 
       await audioContext.audioWorklet.addModule('audio-worklet-processor.js');
 
@@ -265,16 +268,17 @@ async function startAudio() {
           
           if (bufferOffset >= audioBuffer.length) {
             const base64 = arrayBufferToBase64(audioBuffer.buffer);
-            const msg = {
-              realtimeInput: {
-                mediaChunks: [
-                  {
-                    mimeType: "audio/pcm;rate=16000",
-                    data: base64
-                  }
-                ]
+        // 16kHz for Gemini input is still standard for the API, even if our context is 24kHz
+        const msg = {
+          realtimeInput: {
+            mediaChunks: [
+              {
+                mimeType: "audio/pcm;rate=16000",
+                data: base64
               }
-            };
+            ]
+          }
+        };
             socket.send(JSON.stringify(msg));
             bufferOffset = 0;
           }
@@ -316,8 +320,10 @@ function enqueueAudio(base64) {
 }
 
 async function playNextChunk() {
-  if (audioQueue.length === 0) {
+  // Use a jitter buffer for the very first chunks to ensure stability
+  if (audioQueue.length === 0 || (nextStartTime === 0 && audioQueue.length < JITTER_BUFFER_THRESHOLD)) {
     isPlaying = false;
+    if (audioQueue.length === 0) nextStartTime = 0;
     return;
   }
 
@@ -330,13 +336,22 @@ async function playNextChunk() {
     float32[i] = chunk[i] / 0x7FFF;
   }
 
-  const buffer = audioContext.createBuffer(1, float32.length, 24000); // Response is usually 24kHz
+  const buffer = audioContext.createBuffer(1, float32.length, 24000);
   buffer.getChannelData(0).set(float32);
 
   const bufferSource = audioContext.createBufferSource();
   bufferSource.buffer = buffer;
   bufferSource.connect(audioContext.destination);
-  bufferSource.start();
+
+  // High-precision scheduling to eliminate gaps (static/crackling)
+  const currentTime = audioContext.currentTime;
+  if (nextStartTime < currentTime) {
+    // If we're behind, schedule slightly in the future
+    nextStartTime = currentTime + 0.05;
+  }
+
+  bufferSource.start(nextStartTime);
+  nextStartTime += buffer.duration;
 
   bufferSource.onended = () => {
     playNextChunk();
