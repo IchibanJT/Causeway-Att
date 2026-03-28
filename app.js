@@ -21,6 +21,17 @@ const cameraStatus = document.getElementById('camera-status');
 const overlayCanvas = document.getElementById('overlay-canvas');
 const overlayCtx = overlayCanvas.getContext('2d');
 
+// Helper to convert ArrayBuffer to Base64 efficiently
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
 // Pre-fill API key from Vite environment variables if available
 if (import.meta.env.VITE_GEMINI_API_KEY) {
   apiKeyInput.value = import.meta.env.VITE_GEMINI_API_KEY;
@@ -209,10 +220,10 @@ function sendVideoFrame() {
   const base64 = tempCanvas.toDataURL('image/jpeg', 0.6).split(',')[1];
 
   const msg = {
-    realtime_input: {
-      media_chunks: [
+    realtimeInput: {
+      mediaChunks: [
         {
-          mime_type: "image/jpeg",
+          mimeType: "image/jpeg",
           data: base64
         }
       ]
@@ -223,9 +234,11 @@ function sendVideoFrame() {
 
 async function startAudio() {
   try {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      await audioContext.resume(); // Requirement for modern browsers to process audio
+      console.log('AudioContext resumed', audioContext.sampleRate);
 
-    await audioContext.audioWorklet.addModule('audio-worklet-processor.js');
+      await audioContext.audioWorklet.addModule('audio-worklet-processor.js');
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -239,25 +252,38 @@ async function startAudio() {
 
     audioWorkletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
 
+    let audioBuffer = new Int16Array(1600); // 100ms buffer at 16kHz
+    let bufferOffset = 0;
+
     audioWorkletNode.port.onmessage = (event) => {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(event.data)));
-        const msg = {
-          realtime_input: {
-            media_chunks: [
-              {
-                mime_type: "audio/pcm;rate=16000",
-                data: base64
+      if (socket && socket.readyState === WebSocket.OPEN && isRunning) {
+        const inputData = new Int16Array(event.data);
+        
+        // Group chunks to reduce WebSocket overhead (wait for ~100ms)
+        for (let i = 0; i < inputData.length; i++) {
+          audioBuffer[bufferOffset++] = inputData[i];
+          
+          if (bufferOffset >= audioBuffer.length) {
+            const base64 = arrayBufferToBase64(audioBuffer.buffer);
+            const msg = {
+              realtimeInput: {
+                mediaChunks: [
+                  {
+                    mimeType: "audio/pcm;rate=16000",
+                    data: base64
+                  }
+                ]
               }
-            ]
+            };
+            socket.send(JSON.stringify(msg));
+            bufferOffset = 0;
           }
-        };
-        socket.send(JSON.stringify(msg));
+        }
       }
     };
 
     source.connect(audioWorkletNode);
-    audioWorkletNode.connect(audioContext.destination); // Required for some browsers to keep it alive
+    // audioWorkletNode.connect(audioContext.destination); <--- REMOVED to stop feedback (static)
 
     appendMessage('gemini', 'Listening... Talk to me!');
 
@@ -268,16 +294,24 @@ async function startAudio() {
 }
 
 function enqueueAudio(base64) {
-  const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Int16Array(len / 2);
-  for (let i = 0; i < len; i += 2) {
-    bytes[i / 2] = (binaryString.charCodeAt(i + 1) << 8) | binaryString.charCodeAt(i);
-  }
+  try {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    // Ensure we have an even number of bytes for Int16
+    const safeLen = len - (len % 2);
+    const bytes = new Int16Array(safeLen / 2);
+    
+    for (let i = 0; i < safeLen; i += 2) {
+      // Assemble Little Endian 16-bit PCM
+      bytes[i / 2] = (binaryString.charCodeAt(i + 1) << 8) | binaryString.charCodeAt(i);
+    }
 
-  audioQueue.push(bytes);
-  if (!isPlaying) {
-    playNextChunk();
+    audioQueue.push(bytes);
+    if (!isPlaying) {
+      playNextChunk();
+    }
+  } catch (e) {
+    console.error('Error decoding audio chunk', e);
   }
 }
 
